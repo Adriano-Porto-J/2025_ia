@@ -4,6 +4,8 @@ import copy
 import math
 import random
 import time
+import pandas as pd
+import matplotlib.pyplot as plt
 from chessTable import ChessTable
 from minimax import choose_best_move, get_search_stats
 
@@ -266,14 +268,90 @@ def get_game_mode():
     """Get the game mode from user input."""
     while True:
         try:
-            mode = input("Digite 1 para Player vs IA ou 2 para IA vs IA: ")
-            if mode in ["1", "2"]:
+            mode = input("Digite 1 para Player vs I, 2 para IA vs IA ou 3 para realizar um experimento: ")
+            if mode in ["1", "2", "3"]:
                 return mode
             else:
-                print("Por favor, digite 1 ou 2.")
+                print("Por favor, digite 1,2 ou 3.")
         except (EOFError, KeyboardInterrupt):
             print("\nSaindo do jogo.")
             return None
+
+def main_experimentos():
+    """Executa N jogos entre IA vs IA, coleta estatísticas e gera gráficos."""
+    try:
+        N = int(input("Digite a quantidade de jogos a serem simulados: "))
+    except ValueError:
+        print("Entrada inválida. Usando N=10 por padrão.")
+        N = 10
+
+    depth_white, depth_black, time_limit_white, time_limit_black = get_ai_vs_ai_settings()
+
+    resultados = []
+    for i in range(N):
+        print(f"\n=== Jogo {i+1}/{N} ===")
+        game = ChessTable()
+        turn = 0
+
+        while True:
+            game_result = check_game_end(game)
+            if game_result:
+                if game_result == "checkmate":
+                    winner = "Pretas" if game.p_move == 1 else "Brancas"
+                elif game_result == "stalemate":
+                    winner = "Empate"
+                elif game_result == "50_move_draw":
+                    winner = "Empate"
+                else:
+                    winner = "Desconhecido"
+
+                resultados.append({
+                    "jogo": i+1,
+                    "prof_brancas": depth_white,
+                    "prof_pretas": depth_black,
+                    "vencedor": winner
+                })
+                break
+
+            # Escolhe profundidade e tempo do jogador atual
+            current_depth = depth_white if game.p_move == 1 else depth_black
+            current_time_limit = time_limit_white if game.p_move == 1 else time_limit_black
+
+            # Jogada da IA
+            if not play_ai_vs_ai_turn(game, current_depth, current_time_limit, turn):
+                resultados.append({
+                    "jogo": i+1,
+                    "prof_brancas": depth_white,
+                    "prof_pretas": depth_black,
+                    "vencedor": "Erro/Interrompido"
+                })
+                break
+
+            turn += 1
+
+    # Converte para DataFrame para análise
+    df = pd.DataFrame(resultados)
+    print("\n=== Resultados ===")
+    print(df)
+
+    # Estatísticas gerais
+    vitorias_brancas = (df["vencedor"] == "Brancas").sum()
+    vitorias_pretas = (df["vencedor"] == "Pretas").sum()
+    empates = (df["vencedor"] == "Empate").sum()
+
+    print(f"\nVitórias Brancas: {vitorias_brancas}")
+    print(f"Vitórias Pretas: {vitorias_pretas}")
+    print(f"Empates: {empates}")
+
+    # Exibir gráficos
+    plt.figure(figsize=(8,6))
+    df["vencedor"].value_counts().plot(kind="bar", color=["blue", "black", "gray"])
+    plt.title("Distribuição de Resultados")
+    plt.xlabel("Resultado")
+    plt.ylabel("Quantidade de Jogos")
+    plt.show()
+
+    return df
 
 if __name__ == "__main__":
     mode = get_game_mode()
@@ -281,3 +359,5 @@ if __name__ == "__main__":
         main_player_vs_ai()
     elif mode == "2":
         main_ai_vs_ai()
+    elif mode == "3":
+        main_experimentos()
