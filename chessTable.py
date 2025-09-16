@@ -2,7 +2,6 @@
 
 import math
 import random
-from copy import deepcopy
 from pieces import Pawn, Knight, Bishop, Rook, Queen, King
 
 class ChessTable:
@@ -11,12 +10,12 @@ class ChessTable:
         self.y = ['8','7','6','5','4','3','2','1']
         self.notation = {'p':1,'n':2,'b':3,'r':4,'q':5,'k':6}
         self.parts = {1:'Pawn',2:'Knight',3:'Bishop',4:'Rook',5:'Queen',6:'King'}
-        self.weights = {1:1, # Pawn: 1
-                        2:3, # Knight: 3
-                        3:3, # Bishop: 3
-                        4:6, # Rook: 5
-                        5:9, # Queen: 9
-                        6:1000} # King: 1000
+        self.weights = {1:1, # Peão: 1
+                        2:3, # Cavalo: 3
+                        3:3, # Bispo: 3
+                        4:6, # Torre: 5
+                        5:9, # Rainha: 9
+                        6:1000} # Rei: 1000
         self.reset(state=state)
 
     def reset(self, state):
@@ -63,24 +62,34 @@ class ChessTable:
         return False
 
     def get_state(self):
+        # Optimized state generation using list comprehension and join
         piece_map = {0: '.', 1: 'P', 2: 'N', 3: 'B', 4: 'R', 5: 'Q', 6: 'K'}
-        state = ""
+        state_chars = []
         for row in self.board:
             for piece in row:
                 if piece == 0:
-                    state += '.'
+                    state_chars.append('.')
                 else:
                     ch = piece_map[abs(piece)]
-                    if piece < 0:
-                        ch = ch.lower()
-                    state += ch
-        state += str(self.p_move)
-        return state
+                    state_chars.append(ch.lower() if piece < 0 else ch)
+        state_chars.append(str(self.p_move))
+        return ''.join(state_chars)
+    
+    def get_state_hash(self):
+        # Fast hash-based state representation for transposition table
+        # Using tuple of tuples for board state (hashable and fast)
+        board_tuple = tuple(tuple(row) for row in self.board)
+        return hash((board_tuple, self.p_move, tuple(self.castling), self.en_passant))
 
     def register_position(self):
         # Registra a posição atual no contador de repetições
         state_str = self.get_state()
         self.position_counter[state_str] = self.position_counter.get(state_str, 0) + 1
+        
+        # Previne que position_counter cresça muito limpando entradas antigas
+        if len(self.position_counter) > 100:
+            # Mantém apenas entradas com count > 1 (repetições potenciais)
+            self.position_counter = {k: v for k, v in self.position_counter.items() if v > 1}
 
     def unregister_position(self):
         # Remove a posição atual do contador ao desfazer
@@ -110,8 +119,8 @@ class ChessTable:
         print("   -----------------")
         print("   a b c d e f g h\n")
 
-        captured_white = [info['captured'] for info in self.log if info['captured'] > 0]
-        captured_black = [info['captured'] for info in self.log if info['captured'] < 0]
+        captured_white = [info['captured'] for info in self.log if info['captured'] < 0]  # Black pieces captured by white
+        captured_black = [info['captured'] for info in self.log if info['captured'] > 0]  # White pieces captured by black
 
         def pieces_to_string(p_list):
             s = ""
@@ -135,29 +144,196 @@ class ChessTable:
         return (self.x.index(file), self.y.index(rank))
 
     def generate_pseudo_legal_moves(self, player):
-      # Gera todos os movimentos que respeitam colisão/captura
+      # Geração otimizada de movimentos pseudo-legais
       moves = []
       for y in range(8):
           for x in range(8):
               p = self.board[y][x]
-              if p == 0:
+              # Only consider pieces belonging to the current player
+              if p == 0 or (p > 0 and player != 1) or (p < 0 and player != -1):
                   continue
-              if (p > 0 and player == 1) or (p < 0 and player == -1):
-                  piece_type = abs(int(p))
-                  cls_name = self.parts[piece_type]
-                  piece_cls = globals()[cls_name]
-                  poss = piece_cls.movement(self, player, (x, y), capture=True)
-                  for dest in poss:
-                      promotion = None
-                      # Promoção
-                      if piece_type == 1:
-                          if (player == 1 and dest[1] == 0) or (player == -1 and dest[1] == 7):
-                              for promo in ['q','r','b','n']:
-                                  moves.append(((x,y), dest, promo))
-                              continue
-                      moves.append(((x,y), dest, None))
+              
+              piece_type = abs(int(p))
+              # Usa cálculo de movimento otimizado
+              poss = self.get_piece_moves_fast(piece_type, player, (x, y))
+              
+              for dest in poss:
+                  # Skip if trying to move to a square occupied by own piece
+                  dest_piece = self.board[dest[1]][dest[0]]
+                  if dest_piece != 0 and ((dest_piece > 0 and player == 1) or (dest_piece < 0 and player == -1)):
+                      continue
+                  
+                  # Promoção
+                  if piece_type == 1:
+                      if (player == 1 and dest[1] == 0) or (player == -1 and dest[1] == 7):
+                          for promo in ['q','r','b','n']:
+                              moves.append(((x,y), dest, promo))
+                          continue
+                  moves.append(((x,y), dest, None))
       return moves
+    
+    def get_piece_moves_fast(self, piece_type, player, pos):
+        """
+        Cálculo de movimento de peça mais rápido sem instanciação de classe
+        """
+        x, y = pos
+        moves = []
+        
+        if piece_type == 1:  # Peão
+            direction = -1 if player == 1 else 1
+            start_row = 6 if player == 1 else 1
+            
+            # Movimento para frente
+            one_step_y = y + direction
+            if 0 <= one_step_y <= 7 and self.board[one_step_y][x] == 0:
+                moves.append((x, one_step_y))
+                # Movimento duplo da posição inicial
+                if y == start_row and self.board[y + 2 * direction][x] == 0:
+                    moves.append((x, y + 2 * direction))
+            
+            # Capturas
+            for dx in [-1, 1]:
+                nx, ny = x + dx, y + direction
+                if 0 <= nx <= 7 and 0 <= ny <= 7:
+                    cell = self.board[ny][nx]
+                    if cell * player < 0 or (self.en_passant == (nx, ny) and cell == 0):
+                        moves.append((nx, ny))
+                        
+        elif piece_type == 2:  # Cavalo
+            knight_moves = [(2,1), (2,-1), (-2,1), (-2,-1), (1,2), (1,-2), (-1,2), (-1,-2)]
+            for dx, dy in knight_moves:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx <= 7 and 0 <= ny <= 7:
+                    cell = self.board[ny][nx]
+                    if cell == 0 or cell * player < 0:
+                        moves.append((nx, ny))
+                        
+        elif piece_type == 3:  # Bispo
+            for dx, dy in [(1,1), (1,-1), (-1,1), (-1,-1)]:
+                moves.extend(self.get_sliding_moves(pos, dx, dy, player))
+                
+        elif piece_type == 4:  # Torre
+            for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+                moves.extend(self.get_sliding_moves(pos, dx, dy, player))
+                
+        elif piece_type == 5:  # Rainha
+            for dx, dy in [(0,1), (0,-1), (1,0), (-1,0), (1,1), (1,-1), (-1,1), (-1,-1)]:
+                moves.extend(self.get_sliding_moves(pos, dx, dy, player))
+                
+        elif piece_type == 6:  # Rei
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx <= 7 and 0 <= ny <= 7:
+                        cell = self.board[ny][nx]
+                        if cell == 0 or cell * player < 0:
+                            moves.append((nx, ny))
+            
+            # Roque - only if king is on starting position
+            king_start_y = 7 if player == 1 else 0
+            if pos == (4, king_start_y) and not self.is_in_check(player):
+                # Roque pequeno (kingside)
+                if (self.board[king_start_y][5] == 0 and self.board[king_start_y][6] == 0 and
+                    self.board[king_start_y][7] == player * 4):  # Rook in place
+                    if (self.castling[0] == 1 and player == 1) or (self.castling[2] == 1 and player == -1):
+                        # Check if squares king moves through are not attacked
+                        if (not self.is_square_attacked((5, king_start_y), -player) and
+                            not self.is_square_attacked((6, king_start_y), -player)):
+                            moves.append((6, king_start_y))
+                # Roque grande (queenside)
+                if (self.board[king_start_y][3] == 0 and self.board[king_start_y][2] == 0 and
+                    self.board[king_start_y][1] == 0 and self.board[king_start_y][0] == player * 4):  # Rook in place
+                    if (self.castling[1] == 1 and player == 1) or (self.castling[3] == 1 and player == -1):
+                        # Check if squares king moves through are not attacked
+                        if (not self.is_square_attacked((3, king_start_y), -player) and
+                            not self.is_square_attacked((2, king_start_y), -player)):
+                            moves.append((2, king_start_y))
+        
+        return moves
+    
+    def get_sliding_moves(self, pos, dx, dy, player):
+        """
+        Obtém movimentos para peças deslizantes (torre, bispo, rainha)
+        """
+        moves = []
+        x, y = pos
+        for step in range(1, 8):
+            nx, ny = x + dx * step, y + dy * step
+            if not (0 <= nx <= 7 and 0 <= ny <= 7):
+                break
+            cell = self.board[ny][nx]
+            if cell == 0:
+                moves.append((nx, ny))
+            elif cell * player < 0:
+                moves.append((nx, ny))
+                break
+            else:
+                break
+        return moves
 
+    def get_piece_moves_for_attack_check(self, piece_type, player, pos):
+        """
+        Simplified move generation for attack detection - does NOT check castling to avoid recursion
+        """
+        x, y = pos
+        moves = []
+        
+        if piece_type == 1:  # Peão
+            direction = -1 if player == 1 else 1
+            start_row = 6 if player == 1 else 1
+            
+            # Movimento para frente
+            one_step_y = y + direction
+            if 0 <= one_step_y <= 7 and self.board[one_step_y][x] == 0:
+                moves.append((x, one_step_y))
+                # Movimento duplo da posição inicial
+                if y == start_row and self.board[y + 2 * direction][x] == 0:
+                    moves.append((x, y + 2 * direction))
+            
+            # Capturas
+            for dx in [-1, 1]:
+                nx, ny = x + dx, y + direction
+                if 0 <= nx <= 7 and 0 <= ny <= 7:
+                    cell = self.board[ny][nx]
+                    if cell * player < 0 or (self.en_passant == (nx, ny) and cell == 0):
+                        moves.append((nx, ny))
+                        
+        elif piece_type == 2:  # Cavalo
+            knight_moves = [(2,1), (2,-1), (-2,1), (-2,-1), (1,2), (1,-2), (-1,2), (-1,-2)]
+            for dx, dy in knight_moves:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx <= 7 and 0 <= ny <= 7:
+                    cell = self.board[ny][nx]
+                    if cell == 0 or cell * player < 0:
+                        moves.append((nx, ny))
+                        
+        elif piece_type == 3:  # Bispo
+            for dx, dy in [(1,1), (1,-1), (-1,1), (-1,-1)]:
+                moves.extend(self.get_sliding_moves(pos, dx, dy, player))
+                
+        elif piece_type == 4:  # Torre
+            for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+                moves.extend(self.get_sliding_moves(pos, dx, dy, player))
+                
+        elif piece_type == 5:  # Rainha
+            for dx, dy in [(0,1), (0,-1), (1,0), (-1,0), (1,1), (1,-1), (-1,1), (-1,-1)]:
+                moves.extend(self.get_sliding_moves(pos, dx, dy, player))
+                
+        elif piece_type == 6:  # Rei - NO CASTLING CHECK to avoid recursion
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx <= 7 and 0 <= ny <= 7:
+                        cell = self.board[ny][nx]
+                        if cell == 0 or cell * player < 0:
+                            moves.append((nx, ny))
+        
+        return moves
+    
     def is_square_attacked(self, square, by_player):
       # Varre todas as peças de by_player e verifica se alguma tem destino == square
       for y in range(8):
@@ -165,19 +341,18 @@ class ChessTable:
               p = self.board[y][x]
               if p == 0:
                   continue
+              # Check if piece belongs to the attacking player
               if (p > 0 and by_player == 1) or (p < 0 and by_player == -1):
                   piece_type = abs(int(p))
-                  cls_name = self.parts[piece_type]
-                  piece_cls = globals()[cls_name]
-                  poss = piece_cls.movement(self, by_player, (x, y), capture=True)
+                  # Use the simplified move generation that doesn't check castling
+                  poss = self.get_piece_moves_for_attack_check(piece_type, by_player, (x, y))
                   for dest in poss:
-                      #print("destinos do adversario: ", poss)
                       if dest == square:
                           return True
       return False
 
     def find_king(self, player):
-      target = 6  # King id
+      target = 6  # ID do Rei
       for y in range(8):
           for x in range(8):
               if self.board[y][x] == target * player:
@@ -191,19 +366,57 @@ class ChessTable:
       result = self.is_square_attacked(king_pos, -player)
       return result
 
+    def _validate_piece_counts(self, operation="unknown"):
+        """Check for impossible piece counts to catch duplication bugs"""
+        piece_count = {}
+        for y in range(8):
+            for x in range(8):
+                piece = self.board[y][x]
+                if piece != 0:
+                    piece_count[piece] = piece_count.get(piece, 0) + 1
+        
+        # Check for impossible piece counts (basic validation)
+        white_pawns = piece_count.get(1, 0)
+        black_pawns = piece_count.get(-1, 0)
+        if white_pawns > 8:
+            raise RuntimeError(f"CORRUPTION DETECTED: Too many white pawns: {white_pawns} during {operation}")
+        if black_pawns > 8:
+            raise RuntimeError(f"CORRUPTION DETECTED: Too many black pawns: {black_pawns} during {operation}")
+    
     def make_move(self, move):
       (fx,fy), (tx,ty), promotion = move
+      
+      # Basic validation to prevent completely invalid moves
+      if not (0 <= fx <= 7 and 0 <= fy <= 7 and 0 <= tx <= 7 and 0 <= ty <= 7):
+          raise ValueError(f"Invalid move coordinates: {move}")
+          
       moved = self.board[fy][fx]
       captured = self.board[ty][tx]
+      
+      # Can't move empty square
+      if moved == 0:
+          raise ValueError(f"No piece at source square {(fx, fy)}")
+          
+      # Can't move opponent's piece
+      if (moved > 0 and self.p_move != 1) or (moved < 0 and self.p_move != -1):
+          raise ValueError(f"Cannot move opponent's piece: {moved} when player is {self.p_move}")
+          
+      # Can't capture own piece
+      if captured != 0 and ((captured > 0 and self.p_move == 1) or (captured < 0 and self.p_move == -1)):
+          raise ValueError(f"Cannot capture own piece: {captured}")
       info = {
           'move': move,
           'moved': moved,
           'captured': captured,
-          'prev_en_passant': deepcopy(self.en_passant),
-          'prev_castling': deepcopy(self.castling),
+          'prev_en_passant': self.en_passant,  # Simple assignment is fine
+          'prev_castling': self.castling[:],   # Shallow copy is sufficient and much faster
           'prev_p_move': self.p_move,
           'prev_halfmove_clock': self.halfmove_clock,
       }
+      
+      # Use separate log for search moves vs actual game moves
+      if not hasattr(self, 'search_log'):
+          self.search_log = []
 
       # Atualiza o contador de lances
       if abs(int(moved)) == 1 or captured != 0:
@@ -227,13 +440,13 @@ class ChessTable:
           val = promo_map[promotion]
           self.board[ty][tx] = val * (1 if moved > 0 else -1)
 
-      # Castling
+      # Roque
       if abs(int(moved)) == 6 and abs(tx - fx) == 2:
-          # Kingside
+          # Roque pequeno
           if tx - fx == 2:
               rook_x = 7
               rook_to = tx - 1
-          # Queenside
+          # Roque grande
           else:
               rook_x = 0
               rook_to = tx + 1
@@ -248,7 +461,7 @@ class ChessTable:
           mid_y = (fy + ty) // 2
           self.en_passant = (tx, mid_y)
 
-      # Desabilitar en passant
+      # Desabilitar roque
       if moved == 6:
           self.castling[0] = 0
           self.castling[1] = 0
@@ -267,16 +480,36 @@ class ChessTable:
 
       # alterna jogador
       self.p_move *= -1
-      # guardar no log
-      self.log.append(info)
-      self.history.append(deepcopy(self))
+      
+      # Validate piece counts after move
+      self._validate_piece_counts(f"make_move {move}")
+      
+      # Use different logs for search vs actual game moves
+      if hasattr(self, '_in_search') and self._in_search:
+          # During search - use temporary search log
+          self.search_log.append(info)
+      else:
+          # During actual gameplay - use main log
+          self.log.append(info)
+          # Register the new position for repetition detection
+          self.register_position()
+      
       return info
 
     def undo_move(self):
-      # Desfazer movimento
-      if not self.log:
-          return
-      info = self.log.pop()
+      # Desfazer movimento - use correct log based on search state
+      if hasattr(self, '_in_search') and self._in_search:
+          # During search - use search log
+          if not hasattr(self, 'search_log') or not self.search_log:
+              return
+          info = self.search_log.pop()
+      else:
+          # During actual gameplay - use main log  
+          if not self.log:
+              return
+          # Unregister the current position before undoing
+          self.unregister_position()
+          info = self.log.pop()
       (fx,fy), (tx,ty), promotion = info['move']
       self.p_move = info['prev_p_move']
       self.en_passant = info['prev_en_passant']
@@ -288,10 +521,22 @@ class ChessTable:
       self.board[ty][tx] = info['captured']
 
       # Restaura en passant
-      if abs(int(moved)) == 1 and info['captured'] != 0 and (tx,ty) == info['move'][1] and info['prev_en_passant'] is not None:
-          if info['captured'] != 0 and self.board[ty][tx] == 0:
-              cap_y = ty + (1 if moved > 0 else -1)
+      # An en passant capture was made if:
+      # 1. A pawn moved to the en passant square
+      # 2. No piece was captured on the destination square (info['captured'] should be 0 for normal en passant)
+      # 3. There was an en passant target set when the move was made
+      if (abs(int(moved)) == 1 and 
+          info['prev_en_passant'] is not None and 
+          (tx, ty) == info['prev_en_passant']):
+          
+          # This was an en passant capture
+          # The captured pawn was stored separately during make_move
+          # We need to restore it to the square beside the en passant target
+          cap_y = ty + (1 if moved > 0 else -1)
+          # The captured piece was stored in info when make_move detected en passant
+          if 'captured' in info and info['captured'] != 0:
               self.board[cap_y][tx] = info['captured']
+              # Clear the destination square since no piece was actually there
               self.board[ty][tx] = 0
 
       # Restaura roque
@@ -305,19 +550,146 @@ class ChessTable:
           rook_piece = self.board[rook_from[1]][rook_from[0]]
           self.board[rook_from[1]][rook_from[0]] = 0
           self.board[rook_to[1]][rook_to[0]] = rook_piece
+      
+      # Validate piece counts after undo
+      self._validate_piece_counts("undo_move")
+      
       # Remove o último estado do tabuleiro do histórico
       if self.history:
         self.history.pop()
 
     def generate_legal_moves(self, player):
-        # Geração de movimentos que não deixam o rei em cheque
+        # Geração de movimentos legais mais rápida usando detecção leve de xeque
         legal = []
+        king_pos = self.find_king(player)
+        if not king_pos:
+            return legal
+            
         for move in self.generate_pseudo_legal_moves(player):
-            self.make_move(move)          # Aplica temporariamente o movimento
-            if not self.is_in_check(player):  # Verifica cheque do próprio jogador
-                legal.append(move)        # Movimento permitido
-            self.undo_move()              # Desfaz o movimento
+            if self.is_move_legal_fast(move, player, king_pos):
+                legal.append(move)
         return legal
+    
+    def is_move_legal_fast(self, move, player, king_pos):
+        """
+        Validação rápida de movimento legal sem make_move/undo_move completo
+        """
+        (fx, fy), (tx, ty), promotion = move
+        
+        # Basic validation first
+        if not (0 <= fx <= 7 and 0 <= fy <= 7 and 0 <= tx <= 7 and 0 <= ty <= 7):
+            return False
+            
+        moved_piece = self.board[fy][fx]
+        captured_piece = self.board[ty][tx]
+        
+        # Can't move empty square or opponent's piece
+        if moved_piece == 0 or (moved_piece > 0 and player != 1) or (moved_piece < 0 and player != -1):
+            return False
+            
+        # Can't capture own piece
+        if captured_piece != 0 and ((captured_piece > 0 and player == 1) or (captured_piece < 0 and player == -1)):
+            return False
+        
+        # Special castling validation
+        if abs(moved_piece) == 6 and abs(tx - fx) == 2:
+            # This is castling, validate it properly
+            king_start_y = 7 if player == 1 else 0
+            if fy != king_start_y or fx != 4:
+                return False
+            if self.is_in_check(player):
+                return False
+            # Check castling rights and path
+            if tx == 6:  # Kingside
+                if not ((self.castling[0] == 1 and player == 1) or (self.castling[2] == 1 and player == -1)):
+                    return False
+                if self.board[fy][5] != 0 or self.board[fy][6] != 0:
+                    return False
+            elif tx == 2:  # Queenside
+                if not ((self.castling[1] == 1 and player == 1) or (self.castling[3] == 1 and player == -1)):
+                    return False
+                if self.board[fy][1] != 0 or self.board[fy][2] != 0 or self.board[fy][3] != 0:
+                    return False
+        
+        # Temporariamente faz o movimento apenas no tabuleiro
+        self.board[fy][fx] = 0
+        self.board[ty][tx] = moved_piece
+        
+        # Atualiza posição do rei se o rei se moveu
+        new_king_pos = king_pos
+        if abs(moved_piece) == 6:  # Rei se moveu
+            new_king_pos = (tx, ty)
+        
+        # Verifica se o rei estaria em xeque
+        is_legal = not self.is_square_attacked_fast(new_king_pos, -player)
+        
+        # Restaura o tabuleiro
+        self.board[fy][fx] = moved_piece
+        self.board[ty][tx] = captured_piece
+        
+        return is_legal
+    
+    def is_square_attacked_fast(self, square, by_player):
+        """
+        Versão mais rápida de is_square_attacked com otimizações
+        """
+        sx, sy = square
+        
+        # Verifica ataques de peão (mais comuns)
+        pawn_dir = 1 if by_player == 1 else -1
+        for dx in [-1, 1]:
+            px, py = sx + dx, sy + pawn_dir
+            if 0 <= px <= 7 and 0 <= py <= 7:
+                piece = self.board[py][px]
+                if piece == by_player * 1:  # Peão
+                    return True
+        
+        # Verifica ataques do rei (1 casa em todas as direções)
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+                kx, ky = sx + dx, sy + dy
+                if 0 <= kx <= 7 and 0 <= ky <= 7:
+                    piece = self.board[ky][kx]
+                    if piece == by_player * 6:  # Rei
+                        return True
+        
+        # Verifica ataques do cavalo
+        knight_moves = [(2,1), (2,-1), (-2,1), (-2,-1), (1,2), (1,-2), (-1,2), (-1,-2)]
+        for dx, dy in knight_moves:
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx <= 7 and 0 <= ny <= 7:
+                piece = self.board[ny][nx]
+                if piece == by_player * 2:  # Cavalo
+                    return True
+        
+        # Verifica ataques de peças deslizantes (torre, bispo, rainha)
+        # Horizontal e vertical (torre e rainha)
+        for dx, dy in [(0,1), (0,-1), (1,0), (-1,0)]:
+            for step in range(1, 8):
+                rx, ry = sx + dx * step, sy + dy * step
+                if not (0 <= rx <= 7 and 0 <= ry <= 7):
+                    break
+                piece = self.board[ry][rx]
+                if piece != 0:
+                    if piece == by_player * 4 or piece == by_player * 5:  # Torre ou Rainha
+                        return True
+                    break
+        
+        # Diagonal (bispo e rainha)
+        for dx, dy in [(1,1), (1,-1), (-1,1), (-1,-1)]:
+            for step in range(1, 8):
+                bx, by = sx + dx * step, sy + dy * step
+                if not (0 <= bx <= 7 and 0 <= by <= 7):
+                    break
+                piece = self.board[by][bx]
+                if piece != 0:
+                    if piece == by_player * 3 or piece == by_player * 5:  # Bispo ou Rainha
+                        return True
+                    break
+        
+        return False
 
 
     def choose_move(self, depth=3):
@@ -333,7 +705,44 @@ class ChessTable:
         return None
 
     def piece_score(self, piece_id, y, x):
-        return self.weights[piece_id]
+        base_score = self.weights[piece_id]
+        
+        # Add positional bonuses for better play
+        positional_bonus = 0
+        
+        if piece_id == 1:  # Pawn
+            # Encourage pawn advancement
+            if y < 4:  # White pawn advanced
+                positional_bonus += (6 - y) * 0.1
+            elif y > 3:  # Black pawn advanced 
+                positional_bonus += (y - 1) * 0.1
+            # Center pawns are more valuable
+            if x in [3, 4]:
+                positional_bonus += 0.2
+                
+        elif piece_id == 2:  # Knight
+            # Knights are better in the center
+            center_distance = abs(x - 3.5) + abs(y - 3.5)
+            positional_bonus += (7 - center_distance) * 0.1
+            
+        elif piece_id == 3:  # Bishop
+            # Bishops prefer long diagonals
+            if (x + y) % 2 == 0:  # Light squared bishop
+                positional_bonus += 0.1
+            else:  # Dark squared bishop
+                positional_bonus += 0.1
+                
+        elif piece_id == 4:  # Rook
+            # Rooks prefer open files and back rank
+            if y in [0, 7]:  # Back rank
+                positional_bonus += 0.3
+                
+        elif piece_id == 6:  # King
+            # King safety - prefer corners/edges in opening/middlegame
+            if y in [0, 7] and x in range(1, 7):  # Castled position
+                positional_bonus += 0.5
+        
+        return base_score + positional_bonus
 
     def evaluate(self):
         score = 0
@@ -344,11 +753,13 @@ class ChessTable:
                     piece_id = abs(int(p))
                     sign = 1 if p > 0 else -1
                     score += self.piece_score(piece_id, y, x) * sign
-        # penalidade por repetição de posição
-        state_str = self.get_state()
-        repetitions = self.position_counter.get(state_str, 0)
-        if repetitions > 1:
-            score -= repetitions * 50
+        
+        # Verifica repetições apenas se temos histórico suficiente (otimização)
+        if len(self.position_counter) > 1:
+            state_str = self.get_state()
+            repetitions = self.position_counter.get(state_str, 0)
+            if repetitions > 1:
+                score -= repetitions * 50
         return score * self.p_move
 
     def uci_to_move(self, uci_move):

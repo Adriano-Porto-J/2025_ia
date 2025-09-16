@@ -98,7 +98,7 @@ class Knight:
                 if cell == 0 or cell * player < 0:
                     result.append((x, y))
 
-        return result # Retorna a lista com as jogadas possiveis
+        return result # Retorna a lista com as jogadas possíveis
 
 # @title Bishop
 class Bishop:
@@ -106,7 +106,7 @@ class Bishop:
         self.value = 3 # Valor da peça Bispo
         self.notation = 'B' #Notação da peça Bispo
 
-    #Bispo se movimenta apenas na diagonal
+    # Bispo se movimenta apenas na diagonal
     def movement(game, player, pos, capture=True):
         result = []
 
@@ -125,14 +125,14 @@ class Rook:
 
   # Torre se movimenta em retas perpendiculares a partir da sua posição
   def movement(game, player, pos, capture=True):
-      result = [] # Lista com as possiveis jogadas da torre
+      result = [] # Lista com as possíveis jogadas da torre
 
       result += move(game, player, pos, 0, 1, 7, capture) # Movimento vertical para cima
       result += move(game, player, pos, 0, -1, 7, capture) # Movimento vertical para baixo
       result += move(game, player, pos, 1, 0, 7, capture) # Movimento horizontal para a direita
       result += move(game, player, pos, -1, 0, 7, capture) # Movimento horizontal para a esquerda
 
-      return result # Retorna a lista com as ppossiveis jogadas
+      return result # Retorna a lista com as possíveis jogadas
 # @title Queen
 
 class Queen:
@@ -141,7 +141,7 @@ class Queen:
       self.notation = 'Q' # Notação da rainha
 
   def movement(game, player, pos, capture=True):
-      result = [] # Lista de possiveis jogadas da rainha
+      result = [] # Lista de possíveis jogadas da rainha
 
       # Combina os movimentos de Torre e Bispo
       result += move(game, player, pos, 0, 1, 7, capture)  # Cima
@@ -153,7 +153,7 @@ class Queen:
       result += move(game, player, pos, -1, 1, 7, capture) # Diagonal Cima-Esquerda
       result += move(game, player, pos, -1, -1, 7, capture)# Diagonal Baixo-Esquerda
 
-      return result #retorna lista com as possívveis jogadas
+      return result # retorna lista com as possíveis jogadas
 
 # @title King
 
