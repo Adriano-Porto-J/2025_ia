@@ -148,7 +148,22 @@ def main_ai_vs_ai():
             
             print(f"Jogador {player_name} moveu: {game.move_to_uci(move)} ({time_info}, {depth_info}, {stats['nodes_searched']} jogadas analisadas)")
         
-        game.make_move(move)
+        # Attempt to make the move with error handling
+        try:
+            game.make_move(move)
+        except ValueError as e:
+            print(f"ERRO: {e}")
+            print(f"Tentando movimento de fallback para {player_name}...")
+            # Fallback to a random legal move
+            legal_moves = game.generate_legal_moves(game.p_move)
+            if legal_moves:
+                fallback_move = legal_moves[0]
+                print(f"Usando movimento de fallback: {game.move_to_uci(fallback_move)}")
+                game.make_move(fallback_move)
+            else:
+                print("Nenhum movimento legal disponível. Terminando jogo.")
+                break
+        
         game.display()
         turn += 1
 

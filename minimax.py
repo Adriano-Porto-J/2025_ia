@@ -69,57 +69,150 @@ def choose_best_move(game, depth=3, max_time=None):
     # Mark game as being in search mode to skip expensive tracking
     game._in_search = True
     
+    # Store initial game state to detect corruption
+    initial_player = game.p_move
+    initial_board_hash = hash(str(game.board))
+    
     # Clear transposition table periodically to avoid memory issues
     if len(transposition_table) > 50000:  # Allow larger cache for better performance
         transposition_table.clear()
+    
+    # Get legal moves at start and use as fallback
+    legal_moves = game.generate_legal_moves(game.p_move)
+    if not legal_moves:
+        game._in_search = False
+        return None
     
     # If no time limit, use regular minimax
     if max_time is None:
         # maximizing_player should match the current player: True for White (1), False for Black (-1)
         initial_maximizing = (game.p_move == 1)
         _, best_move = minimax(game, depth, -math.inf, math.inf, initial_maximizing)
-        # Clear search mode flag
-        game._in_search = False
-        return best_move
+        
+        # Validate game state wasn't corrupted during search
+        if game.p_move != initial_player:
+            print(f"ERROR: Game state corrupted during search - player changed from {initial_player} to {game.p_move}")
+            game.p_move = initial_player  # Restore correct player
+        
+        final_board_hash = hash(str(game.board))
+        if final_board_hash != initial_board_hash:
+            print(f"ERROR: Board state corrupted during search - hash changed")
+        
+        # Final validation: ensure the returned move is actually legal
+        if best_move is not None and best_move in legal_moves:
+            # Clear search mode flag and clean up search state
+            game._in_search = False
+            if hasattr(game, 'search_log'):
+                if len(game.search_log) > 0:
+                    print(f"WARNING: Search log not empty after non-timed search: {len(game.search_log)} moves left")
+                game.search_log = []
+            if hasattr(game, '_search_depth'):
+                if game._search_depth != 0:
+                    print(f"WARNING: Search depth counter not zero after non-timed search: {game._search_depth}")
+                game._search_depth = 0
+            return best_move
+        else:
+            if best_move is not None:
+                print(f"Warning: Minimax returned illegal move {best_move}, falling back to first legal move")
+            # Clear search mode flag and clean up search state
+            game._in_search = False
+            if hasattr(game, 'search_log'):
+                game.search_log = []
+            if hasattr(game, '_search_depth'):
+                game._search_depth = 0
+            return legal_moves[0]
     
     # Iterative deepening com limite de tempo
-    best_move = None
-    legal_moves = game.generate_legal_moves(game.p_move)
-    if not legal_moves:
-        return None
+    # Clear transposition table for timed searches to prevent corruption
+    transposition_table.clear()
     
-    # Começa com um movimento aleatório como fallback
-    best_move = legal_moves[0]
-    
+    # Use the legal moves we already generated
+    best_move = legal_moves[0]  # Safe fallback - always use first legal move
     completed_depth = 0
-    try:
-        for current_depth in range(1, depth + 1):
-            # Conservative time check before starting new depth
-            elapsed = time.time() - search_start_time
-            # Use more time for first few depths, then be more conservative
-            time_threshold = max_time * (0.7 if current_depth <= 2 else 0.4)
-            if elapsed > time_threshold:
-                break
-                
+    
+    for current_depth in range(1, depth + 1):
+        # Conservative time check before starting new depth
+        elapsed = time.time() - search_start_time
+        # Use more time for first few depths, then be more conservative
+        time_threshold = max_time * (0.7 if current_depth <= 2 else 0.4)
+        if elapsed > time_threshold:
+            break
+            
+        # Try this depth level with timeout protection
+        try:
             # maximizing_player should match the current player: True for White (1), False for Black (-1)
             initial_maximizing = (game.p_move == 1)
             _, move = minimax(game, current_depth, -math.inf, math.inf, initial_maximizing)
-            if move is not None:
+            
+            # Validate the move before accepting it
+            if move is not None and move in legal_moves:
                 best_move = move
                 completed_depth = current_depth
+            else:
+                # Invalid move returned - stop iterative deepening but keep previous best
+                if move is not None:
+                    print(f"Warning: Minimax depth {current_depth} returned illegal move {move}, keeping previous best")
+                break
                 
-    except TimeoutError:
-        # Limite de tempo excedido durante busca - retorna melhor movimento encontrado
-        pass
+        except TimeoutError:
+            # Timeout during this depth - keep the best move from previous completed depth
+            # Force cleanup of any incomplete search state
+            while hasattr(game, 'search_log') and len(game.search_log) > 0:
+                try:
+                    game.undo_move()
+                except:
+                    break
+            break
+        except Exception as e:
+            # Any other error - stop and keep previous best move
+            print(f"Warning: Error during minimax depth {current_depth}: {e}, keeping previous best")
+            # Force cleanup of any incomplete search state
+            while hasattr(game, 'search_log') and len(game.search_log) > 0:
+                try:
+                    game.undo_move()
+                except:
+                    break
+            break
     
     # Store the actual depth reached for debugging
     global actual_depth_reached
     actual_depth_reached = completed_depth
     
-    # Clear search mode flag
-    game._in_search = False
+    # Validate game state wasn't corrupted during iterative deepening search
+    if game.p_move != initial_player:
+        print(f"ERROR: Game state corrupted during iterative search - player changed from {initial_player} to {game.p_move}")
+        game.p_move = initial_player  # Restore correct player
     
-    return best_move
+    final_board_hash = hash(str(game.board))
+    if final_board_hash != initial_board_hash:
+        print(f"ERROR: Board state corrupted during iterative search - hash changed")
+    
+    # Clear search mode flag and clean up search state
+    game._in_search = False
+    # Force cleanup of any remaining moves in search log
+    if hasattr(game, 'search_log'):
+        if len(game.search_log) > 0:
+            print(f"WARNING: Search log not empty after search: {len(game.search_log)} moves left - forcing cleanup")
+            # Try to undo remaining moves
+            while len(game.search_log) > 0:
+                try:
+                    game.undo_move()
+                except:
+                    # If undo fails, just clear the log
+                    break
+        game.search_log = []
+    if hasattr(game, '_search_depth'):
+        if game._search_depth != 0:
+            print(f"WARNING: Search depth counter not zero after search: {game._search_depth}")
+        game._search_depth = 0
+    
+    # Final validation: ensure the returned move is actually legal
+    if best_move is not None and best_move in legal_moves:
+        return best_move
+    else:
+        # This should never happen now, but safety check
+        print(f"Warning: Final move validation failed, using first legal move")
+        return legal_moves[0]
 
 def get_search_stats():
     """
@@ -149,36 +242,29 @@ def minimax(game, depth, alpha, beta, maximizing_player):
             if elapsed >= time_limit * 0.95:  # Stop at 95% of time limit for safety
                 raise TimeoutError("Time limit exceeded")
     
-    # Check transposition table first - use fast hash instead of expensive string
-    try:
-        position_key = (game.get_state_hash(), depth, maximizing_player)
-        if position_key in transposition_table:
-            cache_hits += 1
-            return transposition_table[position_key]
-    except:
-        # Fallback to string-based key if hash fails
-        position_key = game.get_state() + str(depth) + str(maximizing_player)
-        if position_key in transposition_table:
-            cache_hits += 1
-            return transposition_table[position_key]
+    # Transposition table temporarily disabled to prevent corruption issues
+    # TODO: Fix state key generation and re-enable caching
+    position_key = None
     
+    # Important: Generate moves for the CURRENT player, not based on maximizing_player
+    # The maximizing_player parameter is for evaluation direction, not move generation
     legal_moves = game.generate_legal_moves(game.p_move)
     if not legal_moves:
         if game.is_in_check(game.p_move):
-            result = (-9999 if maximizing_player else 9999), None
+            eval_score = -9999 if maximizing_player else 9999
         else:
-            result = 0, None  # empate por afogamento
-        transposition_table[position_key] = result
-        return result
+            eval_score = 0  # empate por afogamento
+        # transposition_table[position_key] = eval_score  # Disabled
+        return eval_score, None
 
     if depth == 0:
-        result = game.evaluate(), None
-        # Store in transposition table for reuse
-        try:
-            transposition_table[position_key] = result
-        except:
-            pass  # Skip caching if key generation fails
-        return result
+        eval_score = game.evaluate()
+        # Transposition table disabled
+        # try:
+        #     transposition_table[position_key] = eval_score
+        # except:
+        #     pass  # Skip caching if key generation fails
+        return eval_score, None
 
     # Ordenação de movimentos: prioriza capturas e xeques para melhor poda
     legal_moves = order_moves(game, legal_moves)
@@ -200,9 +286,30 @@ def minimax(game, depth, alpha, beta, maximizing_player):
             alpha = max(alpha, eval_score)
             if beta <= alpha:
                 break
-        result = max_eval, random.choice(best_moves)
-        transposition_table[position_key] = result
-        return result
+                
+        # Transposition table disabled
+        # transposition_table[position_key] = max_eval
+        
+        # Return both evaluation and selected move
+        selected_move = random.choice(best_moves)
+        
+        # Additional safety check: ensure the selected move belongs to current player
+        if selected_move is not None:
+            fx, fy = selected_move[0]
+            if 0 <= fy < 8 and 0 <= fx < 8:  # Bounds check
+                piece_at_source = game.board[fy][fx]
+                # Verify piece belongs to current player
+                if piece_at_source == 0:
+                    print(f"Error: Minimax trying to move from empty square ({fx},{fy}) for player {game.p_move}")
+                    return max_eval, None
+                elif (piece_at_source > 0 and game.p_move != 1) or (piece_at_source < 0 and game.p_move != -1):
+                    print(f"Error: Minimax trying to move opponent's piece {piece_at_source} for player {game.p_move}")
+                    return max_eval, None
+            else:
+                print(f"Error: Minimax returned out-of-bounds move {selected_move}")
+                return max_eval, None
+        
+        return max_eval, selected_move
     else:
         min_eval = math.inf
         for move in legal_moves:
@@ -219,6 +326,27 @@ def minimax(game, depth, alpha, beta, maximizing_player):
             beta = min(beta, eval_score)
             if beta <= alpha:
                 break
-        result = min_eval, random.choice(best_moves)
-        transposition_table[position_key] = result
-        return result
+                
+        # Transposition table disabled
+        # transposition_table[position_key] = min_eval
+        
+        # Return both evaluation and selected move
+        selected_move = random.choice(best_moves)
+        
+        # Additional safety check: ensure the selected move belongs to current player
+        if selected_move is not None:
+            fx, fy = selected_move[0]
+            if 0 <= fy < 8 and 0 <= fx < 8:  # Bounds check
+                piece_at_source = game.board[fy][fx]
+                # Verify piece belongs to current player
+                if piece_at_source == 0:
+                    print(f"Error: Minimax trying to move from empty square ({fx},{fy}) for player {game.p_move}")
+                    return min_eval, None
+                elif (piece_at_source > 0 and game.p_move != 1) or (piece_at_source < 0 and game.p_move != -1):
+                    print(f"Error: Minimax trying to move opponent's piece {piece_at_source} for player {game.p_move}")
+                    return min_eval, None
+            else:
+                print(f"Error: Minimax returned out-of-bounds move {selected_move}")
+                return min_eval, None
+        
+        return min_eval, selected_move

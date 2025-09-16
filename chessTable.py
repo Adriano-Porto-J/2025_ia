@@ -487,7 +487,13 @@ class ChessTable:
       # Use different logs for search vs actual game moves
       if hasattr(self, '_in_search') and self._in_search:
           # During search - use temporary search log
+          if not hasattr(self, 'search_log'):
+              self.search_log = []
           self.search_log.append(info)
+          # Debug: track search depth
+          if not hasattr(self, '_search_depth'):
+              self._search_depth = 0
+          self._search_depth += 1
       else:
           # During actual gameplay - use main log
           self.log.append(info)
@@ -501,8 +507,12 @@ class ChessTable:
       if hasattr(self, '_in_search') and self._in_search:
           # During search - use search log
           if not hasattr(self, 'search_log') or not self.search_log:
+              print(f"WARNING: Trying to undo search move but search log is empty!")
               return
           info = self.search_log.pop()
+          # Debug: track search depth
+          if hasattr(self, '_search_depth'):
+              self._search_depth -= 1
       else:
           # During actual gameplay - use main log  
           if not self.log:
