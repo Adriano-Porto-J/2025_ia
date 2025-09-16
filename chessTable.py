@@ -721,11 +721,11 @@ class ChessTable:
         positional_bonus = 0
         
         if piece_id == 1:  # Pawn
-            # Encourage pawn advancement
-            if y < 4:  # White pawn advanced
-                positional_bonus += (6 - y) * 0.1
-            elif y > 3:  # Black pawn advanced 
-                positional_bonus += (y - 1) * 0.1
+            # Encourage pawn advancement (rewards moving toward opponent's side)
+            if y < 4:  # White pawn (starts at y=6, advances toward y=0)
+                positional_bonus += (6 - y) * 0.1  # y=6 gives 0, y=0 gives 0.6
+            elif y > 3:  # Black pawn (starts at y=1, advances toward y=7)
+                positional_bonus += (y - 1) * 0.1  # y=1 gives 0, y=7 gives 0.6
             # Center pawns are more valuable
             if x in [3, 4]:
                 positional_bonus += 0.2
@@ -770,7 +770,7 @@ class ChessTable:
             repetitions = self.position_counter.get(state_str, 0)
             if repetitions > 1:
                 score -= repetitions * 50
-        return score * self.p_move
+        return score  # Return absolute score: positive=White advantage, negative=Black advantage
 
     def uci_to_move(self, uci_move):
         # UCI (ex: 'e2e4', 'e7e8q') para tupla ((fx,fy),(tx,ty), promotion)
