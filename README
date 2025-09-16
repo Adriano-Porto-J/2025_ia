@@ -1,4 +1,0 @@
-Antes de rodar a main, rode no bash:
-
-pip install pandas
-pip install matplotlib
