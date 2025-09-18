@@ -234,9 +234,9 @@ def play_ai_vs_ai_turn(game, depth, time_limit, turn_number):
     
     # Try to make the move
     if try_make_move(game, move, player_name):
-        return True
+        return True,thinking_time, stats['nodes_searched']
     else:
-        return False
+        return False,thinking_time, stats['nodes_searched']
 
 def main_ai_vs_ai():
     """Main function for AI vs AI game mode."""
@@ -258,7 +258,8 @@ def main_ai_vs_ai():
         current_time_limit = time_limit_white if game.p_move == 1 else time_limit_black
         
         # Play the turn
-        if not play_ai_vs_ai_turn(game, current_depth, current_time_limit, turn):
+        success, thinking_time, nodes_searched =  play_ai_vs_ai_turn(game, current_depth, current_time_limit, turn)
+        if not success:
             break
         
         game.display()
@@ -288,6 +289,7 @@ def main_experimentos():
     depth_white, depth_black, time_limit_white, time_limit_black = get_ai_vs_ai_settings()
 
     resultados = []
+    metricas = []
     for i in range(N):
         print(f"\n=== Jogo {i+1}/{N} ===")
         game = ChessTable()
@@ -311,14 +313,23 @@ def main_experimentos():
                     "prof_pretas": depth_black,
                     "vencedor": winner
                 })
+                metricas.append({
+                    "jogo": i+1,
+                    "turno": turn,
+                    "jogador": player_name,
+                    "tempo_pensando": thinking_time,
+                    "jogadas_analisadas": nodes_searched,
+                })
                 break
 
             # Escolhe profundidade e tempo do jogador atual
             current_depth = depth_white if game.p_move == 1 else depth_black
             current_time_limit = time_limit_white if game.p_move == 1 else time_limit_black
+            player_name = "Brancas" if game.p_move == 1 else "Pretas"
 
             # Jogada da IA
-            if not play_ai_vs_ai_turn(game, current_depth, current_time_limit, turn):
+            sucess, thinking_time, nodes_searched =  play_ai_vs_ai_turn(game, current_depth, current_time_limit, turn)
+            if not sucess:
                 resultados.append({
                     "jogo": i+1,
                     "prof_brancas": depth_white,
@@ -326,32 +337,71 @@ def main_experimentos():
                     "vencedor": "Erro/Interrompido"
                 })
                 break
+            
+            metricas.append({
+                "jogo": i+1,
+                "turno": turn,
+                "jogador": player_name,
+                "tempo_pensando": thinking_time,
+                "jogadas_analisadas": nodes_searched,
+            })
 
             turn += 1
 
     # Converte para DataFrame para análise
-    df = pd.DataFrame(resultados)
+    df_result = pd.DataFrame(resultados)
+    df_metricas = pd.DataFrame(metricas)
+    df_media = df_metricas.groupby(["jogo", "jogador"]).agg({
+        "tempo_pensando": "mean",
+        "jogadas_analisadas": "mean"
+        }).reset_index()
+
     print("\n=== Resultados ===")
-    print(df)
+    print(df_result)
 
     # Estatísticas gerais
-    vitorias_brancas = (df["vencedor"] == "Brancas").sum()
-    vitorias_pretas = (df["vencedor"] == "Pretas").sum()
-    empates = (df["vencedor"] == "Empate").sum()
+    vitorias_brancas = (df_result["vencedor"] == "Brancas").sum()
+    vitorias_pretas = (df_result["vencedor"] == "Pretas").sum()
+    empates = (df_result["vencedor"] == "Empate").sum()
 
     print(f"\nVitórias Brancas: {vitorias_brancas}")
     print(f"Vitórias Pretas: {vitorias_pretas}")
     print(f"Empates: {empates}")
 
     # Exibir gráficos
-    plt.figure(figsize=(8,6))
-    df["vencedor"].value_counts().plot(kind="bar", color=["blue", "black", "gray"])
-    plt.title("Distribuição de Resultados")
-    plt.xlabel("Resultado")
-    plt.ylabel("Quantidade de Jogos")
-    plt.show()
+    
+    while True:
+        N = int(input("Digite 1 para visualizar o grásfico de análise de vitórias ou \n digite 2 para visualizar o gráfico de análise de tempo para escolher uma jogada ou \n digite 3 para vizualisar o gráfico de análise da quantidade de jogadas analisadas ou \n digite 4 para encerrar a análise: "))
+        if (N == 1):
+            df_result["vencedor"].value_counts().plot(kind="bar", color=["blue", "black", "gray"])
+            plt.title("Distribuição de Resultados")
+            plt.xlabel("Resultado")
+            plt.ylabel("Quantidade de Jogos")
+            plt.show()
+        elif (N == 2):
+            plt.figure(figsize=(10,6))
+            for jogador, dados in df_media.groupby("jogador"):
+                plt.plot(dados["jogo"], dados["tempo_pensando"], marker="o", label=jogador)
+            plt.title("Tempo médio de cálculo por partida")
+            plt.xlabel("Partida")
+            plt.ylabel("Tempo médio (s)")
+            plt.legend()
+            plt.grid(True)
+            plt.show()
 
-    return df
+        elif (N == 3):
+            plt.figure(figsize=(10,6))
+            for jogador, dados in df_media.groupby("jogador"):
+                plt.plot(dados["jogo"], dados["jogadas_analisadas"], marker="o", label=jogador)
+            plt.title("Média de jogadas analisadas por partida")
+            plt.xlabel("Partida")
+            plt.ylabel("Jogadas analisadas (média)")
+            plt.legend()
+            plt.grid(True)
+            plt.show()
+        elif (N == 4): break
+        
+        else: print("Entrada inválida")
 
 if __name__ == "__main__":
     mode = get_game_mode()
