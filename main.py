@@ -7,7 +7,9 @@ import time
 import pandas as pd
 import matplotlib.pyplot as plt
 from chessTable import ChessTable
+from learningEngine import LearningEngine
 from minimax import choose_best_move, get_search_stats
+from pieces import *
 
 # Configuration Functions
 def get_ai_settings():
@@ -116,8 +118,7 @@ def execute_ai_move(game, depth, time_limit):
 def try_make_move(game, move, player_name):
     """Try to make a move with error handling and fallback."""
     try:
-        game.make_move(move)
-        return True
+        return game.make_move(move)
     except ValueError as e:
         print(f"ERRO: {e}")
         print(f"Tentando movimento de fallback para {player_name}...")
@@ -127,8 +128,7 @@ def try_make_move(game, move, player_name):
         if legal_moves:
             fallback_move = legal_moves[0]
             print(f"Usando movimento de fallback: {game.move_to_uci(fallback_move)}")
-            game.make_move(fallback_move)
-            return True
+            return game.make_move(fallback_move)
         else:
             print("Nenhum movimento legal disponível. Terminando jogo.")
             return False
@@ -233,8 +233,9 @@ def play_ai_vs_ai_turn(game, depth, time_limit, turn_number):
         print(move_info)
     
     # Try to make the move
-    if try_make_move(game, move, player_name):
-        return True,thinking_time, stats['nodes_searched']
+    info = try_make_move(game, move, player_name)
+    if info:
+        return info,thinking_time, stats['nodes_searched']
     else:
         return False,thinking_time, stats['nodes_searched']
 
@@ -292,8 +293,9 @@ def main_experimentos():
     metricas = []
     for i in range(N):
         print(f"\n=== Jogo {i+1}/{N} ===")
-        game = ChessTable()
+        game = LearningEngine()
         turn = 0
+        move_history = []
 
         while True:
             game_result = check_game_end(game)
@@ -328,8 +330,8 @@ def main_experimentos():
             player_name = "Brancas" if game.p_move == 1 else "Pretas"
 
             # Jogada da IA
-            sucess, thinking_time, nodes_searched =  play_ai_vs_ai_turn(game, current_depth, current_time_limit, turn)
-            if not sucess:
+            info, thinking_time, nodes_searched =  play_ai_vs_ai_turn(game, current_depth, current_time_limit, turn)
+            if not info:
                 resultados.append({
                     "jogo": i+1,
                     "prof_brancas": depth_white,
@@ -345,8 +347,14 @@ def main_experimentos():
                 "tempo_pensando": thinking_time,
                 "jogadas_analisadas": nodes_searched,
             })
-
+            piece_id = abs(int(info['moved']))
+            cls_name = game.parts[piece_id]
+            piece_cls = globals()[cls_name]
+            target = info['move'][1]
+            poss = piece_cls.movement(game, game.p_move, target, capture=True)
+            move_history.append((piece_id, target, len(poss)))
             turn += 1
+        game.adjust_weights(move_history)
 
     # Converte para DataFrame para análise
     df_result = pd.DataFrame(resultados)

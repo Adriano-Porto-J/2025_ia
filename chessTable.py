@@ -19,7 +19,6 @@ class ChessTable:
         self.reset(state=state)
 
     def reset(self, state):
-        self.history = []
         self.log = []
         self.init_pos = state
         self.state_table = {}
@@ -563,10 +562,6 @@ class ChessTable:
       
       # Validate piece counts after undo
       self._validate_piece_counts("undo_move")
-      
-      # Remove o último estado do tabuleiro do histórico
-      if self.history:
-        self.history.pop()
 
     def generate_legal_moves(self, player):
         # Geração de movimentos legais mais rápida usando detecção leve de xeque
@@ -796,9 +791,9 @@ class ChessTable:
         return (from_pos, to_pos, promotion)
 
     def move_to_uci(self, move):
-      # Tupla ((fx,fy),(tx,ty), promotion) para UCI (ex: 'e2e4', 'e7e8q')
-      (from_pos, to_pos, promotion) = move
-      uci = self.square_to_algebraic(from_pos) + self.square_to_algebraic(to_pos)
-      if promotion:
-          uci += promotion
-      return uci
+        # Tupla ((fx,fy),(tx,ty), promotion) para UCI (ex: 'e2e4', 'e7e8q')
+        (from_pos, to_pos, promotion) = move
+        uci = self.square_to_algebraic(from_pos) + self.square_to_algebraic(to_pos)
+        if promotion:
+            uci += promotion
+        return uci
